@@ -1,0 +1,57 @@
+[Unit]
+Description=tgmonitor - monitor de promoções do Telegram
+Documentation=https://github.com/SEU_USUARIO/telegram-monitor
+After=network-online.target
+Wants=network-online.target
+# Nunca desistir de reiniciar por excesso de falhas (o supervisor interno já faz backoff).
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=tgmonitor
+Group=tgmonitor
+WorkingDirectory=/var/lib/telegram-monitor
+EnvironmentFile=/etc/tgmonitor/tgmonitor.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/telegram-monitor/.venv/bin/tgmonitor --env-file /etc/tgmonitor/tgmonitor.env run
+
+Restart=always
+RestartSec=10
+# Código 2 = sessão do Telegram inválida: reiniciar não resolve (precisa de `tgmonitor-admin login`).
+RestartPreventExitStatus=2
+TimeoutStopSec=20
+
+# Memória: o processo usa ~80-120 MB; limites protegem a VM de 1 GB.
+MemoryHigh=250M
+MemoryMax=300M
+
+# Dados
+StateDirectory=telegram-monitor
+StateDirectoryMode=0700
+UMask=0077
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/var/lib/telegram-monitor
+
+[Install]
+WantedBy=multi-user.target

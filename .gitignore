@@ -1,0 +1,33 @@
+# Segredos e dados sensíveis — NUNCA versionar
+.env
+.env.*
+!.env.example
+*.session
+*.session-journal
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editores / SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

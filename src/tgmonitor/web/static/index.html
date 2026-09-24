@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>tgmonitor</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <!-- Token: pedido uma vez e mantido só em memória (some ao recarregar a página). -->
+  <dialog id="token-dialog">
+    <form id="token-form" method="dialog">
+      <h2>tgmonitor</h2>
+      <p class="muted">Informe o <code>API_TOKEN</code> do seu <code>.env</code>.</p>
+      <input id="token-input" type="password" autocomplete="off" required minlength="32" placeholder="API_TOKEN">
+      <p id="token-error" class="error" hidden></p>
+      <button type="submit" class="primary">Entrar</button>
+    </form>
+  </dialog>
+
+  <header>
+    <h1>tgmonitor</h1>
+    <span id="status-pill" class="pill">…</span>
+    <nav id="tabs">
+      <button data-tab="chats" class="active">Grupos</button>
+      <button data-tab="rules">Regras</button>
+      <button data-tab="test">Testar</button>
+      <button data-tab="alerts">Histórico</button>
+      <button data-tab="settings">Ajustes</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- ---------------------------------------------------------- Grupos -->
+    <section id="tab-chats" class="tab">
+      <div class="toolbar">
+        <input id="chat-search" type="search" placeholder="Buscar grupo/canal…">
+        <label class="check"><input id="chat-only-monitored" type="checkbox"> só monitorados</label>
+        <button id="chat-refresh">Atualizar lista</button>
+      </div>
+      <p class="muted" id="chat-summary"></p>
+      <ul id="chat-list" class="list"></ul>
+    </section>
+
+    <!-- ---------------------------------------------------------- Regras -->
+    <section id="tab-rules" class="tab" hidden>
+      <div class="toolbar">
+        <button id="rule-new" class="primary">Nova regra</button>
+      </div>
+      <table class="rules">
+        <thead><tr><th>Ativa</th><th>Nome</th><th>Inclusão</th><th>Exclusão</th><th>Preço máx.</th><th></th></tr></thead>
+        <tbody id="rule-rows"></tbody>
+      </table>
+
+      <form id="rule-form" class="card" hidden>
+        <h3 id="rule-form-title">Nova regra</h3>
+        <label>Nome <input name="name" required maxlength="100"></label>
+        <div class="grid2">
+          <label>Termos de inclusão <span class="muted">(um por linha; basta um casar)</span>
+            <textarea name="include" rows="6" required placeholder="s25 ultra&#10;/s2[56]\s*(\+|plus|ultra)/"></textarea>
+          </label>
+          <label>Termos de exclusão <span class="muted">(opcional; um por linha)</span>
+            <textarea name="exclude" rows="6" placeholder="capa&#10;película&#10;fe"></textarea>
+          </label>
+        </div>
+        <p class="hint">Termos simples casam por palavra inteira, sem acento e sem diferenciar maiúsculas
+          (<code>fe</code> não casa com “feito”). Regex entre barras: <code>/s2[56]\s*ultra/</code>.</p>
+        <div class="row">
+          <label>Preço máximo (R$, opcional) <input name="max_price" inputmode="decimal" placeholder="5.500,00"></label>
+          <label class="check"><input name="enabled" type="checkbox" checked> ativa</label>
+        </div>
+        <details>
+          <summary>Testar este rascunho</summary>
+          <textarea id="draft-text" rows="5" placeholder="Cole aqui o texto de uma promoção…"></textarea>
+          <button type="button" id="draft-test">Testar</button>
+          <div id="draft-result"></div>
+        </details>
+        <p id="rule-error" class="error" hidden></p>
+        <div class="row">
+          <button type="submit" class="primary">Salvar</button>
+          <button type="button" id="rule-cancel">Cancelar</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- ---------------------------------------------------------- Testar -->
+    <section id="tab-test" class="tab" hidden>
+      <div class="card">
+        <label>Regra
+          <select id="test-rule"></select>
+        </label>
+        <label>Texto da mensagem
+          <textarea id="test-text" rows="10" placeholder="Cole aqui o texto de uma promoção…"></textarea>
+        </label>
+        <button id="test-run" class="primary">Testar</button>
+      </div>
+      <div id="test-result"></div>
+    </section>
+
+    <!-- -------------------------------------------------------- Histórico -->
+    <section id="tab-alerts" class="tab" hidden>
+      <div class="toolbar"><button id="alerts-reload">Recarregar</button></div>
+      <ul id="alert-list" class="alerts"></ul>
+    </section>
+
+    <!-- ---------------------------------------------------------- Ajustes -->
+    <section id="tab-settings" class="tab" hidden>
+      <form id="settings-form" class="card">
+        <label class="check"><input name="paused" type="checkbox"> Pausar alertas</label>
+        <label>Janela de deduplicação (horas) <input name="dedup_window_hours" type="number" min="0.1" step="0.1" required></label>
+        <label>Ignorar mensagens novas com mais de (horas) <input name="max_new_message_age_hours" type="number" min="0.1" step="0.1" required></label>
+        <label>Ignorar edições de mensagens com mais de (horas) <input name="max_edit_age_hours" type="number" min="0.1" step="0.1" required></label>
+        <label>Manter histórico por (dias) <input name="alert_retention_days" type="number" min="1" step="1" required></label>
+        <p id="settings-msg" class="muted"></p>
+        <button type="submit" class="primary">Salvar ajustes</button>
+      </form>
+      <div class="card">
+        <h3>Saúde</h3>
+        <pre id="health"></pre>
+      </div>
+    </section>
+  </main>
+  <div id="toast" hidden></div>
+</body>
+</html>
