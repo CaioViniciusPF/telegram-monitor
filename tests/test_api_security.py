@@ -134,3 +134,46 @@ async def test_invalid_regex_rejected(client: httpx.AsyncClient) -> None:
 async def test_rule_requires_include(client: httpx.AsyncClient) -> None:
     r = await client.post("/api/rules", json={"name": "x", "include_terms": ["  "]}, headers=AUTH)
     assert r.status_code == 422
+
+
+async def test_health_reports_api_version(client: httpx.AsyncClient) -> None:
+    """A interface compara com EXPECTED_API_VERSION para avisar de serviço desatualizado."""
+    from tgmonitor.web.api import API_VERSION
+
+    r = await client.get("/api/health", headers=AUTH)
+    assert r.json()["api_version"] == API_VERSION
+
+
+def test_frontend_expects_same_api_version() -> None:
+    import re
+    from pathlib import Path
+
+    from tgmonitor.web.api import API_VERSION, STATIC_DIR
+
+    js = (Path(STATIC_DIR) / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"const EXPECTED_API_VERSION = (\d+);", js)
+    assert m and int(m.group(1)) == API_VERSION
+
+
+async def test_draft_test_returns_highlight_positions(client: httpx.AsyncClient) -> None:
+    """Regressão do erro "include_spans is not iterable" no rascunho da aba Regras."""
+    text = "Capa grátis! Galaxy S25 Ultra de R$ 5.999 por R$ 5.499 ou 12x de R$ 458"
+    draft = {
+        "name": "rascunho",
+        "include_terms": [r"/s2[56]\s*ultra/"],
+        "exclude_terms": ["capa"],
+        "max_price_cents": 600000,
+    }
+    r = await client.post("/api/rules/test", json={"text": text, "draft": draft}, headers=AUTH)
+    assert r.status_code == 200, r.text
+    res = r.json()["results"][0]
+    assert [text[s["start"] : s["end"]] for s in res["include_spans"]] == ["S25 Ultra"]
+    assert [(text[s["start"] : s["end"]], s["term"]) for s in res["exclude_spans"]] == [
+        ("Capa", "capa")
+    ]
+    cands = r.json()["price_candidates"]
+    assert [(text[c["start"] : c["end"]], c["used"], c["reason"]) for c in cands] == [
+        ("R$ 5.999", False, "sem contexto"),
+        ("R$ 5.499", True, "por"),
+        ("R$ 458", False, "parcela"),
+    ]

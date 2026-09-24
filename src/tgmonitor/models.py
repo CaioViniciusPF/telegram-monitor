@@ -84,6 +84,7 @@ class Alert(BaseModel):
     is_edit: bool
     delivered: bool
     created_at: int
+    previous_price_cents: int | None = None  # preenchido quando um post editado baixou de preço
 
 
 class RuntimeSettings(BaseModel):

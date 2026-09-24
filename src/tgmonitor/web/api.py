@@ -16,10 +16,10 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from tgmonitor.matching.matcher import CompiledRule, evaluate
 from tgmonitor.matching.price import PriceKind
@@ -28,6 +28,9 @@ from tgmonitor.pipeline import Pipeline
 from tgmonitor.repository import Repository
 
 STATIC_DIR = Path(__file__).parent / "static"
+# Versão do contrato API <-> interface. Suba junto com EXPECTED_API_VERSION em static/app.js
+# sempre que a interface passar a depender de campos novos da API.
+API_VERSION = 2
 ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
 
 _SECURITY_HEADERS = {
@@ -85,7 +88,7 @@ def create_app(deps: AppDeps) -> FastAPI:
 
     @api.get("/health")
     async def health() -> dict[str, Any]:
-        return deps.health()
+        return {**deps.health(), "api_version": API_VERSION}
 
     # ------------------------------------------------------------- chats
 
@@ -150,11 +153,20 @@ def create_app(deps: AppDeps) -> FastAPI:
         else:
             specs = [r.to_spec() for r in await deps.repo.list_rules()]
         ev = evaluate(body.text, [CompiledRule.compile(s) for s in specs], explain=True)
+        max_prices = {s.id: s.max_price_cents for s in specs}
         return {
             "price_cents": ev.price_cents,
             "price_candidates": [
-                {"raw": c.raw, "cents": c.cents, "kind": PriceKind(c.kind).name.lower()}
-                for c in ev.price_candidates
+                {
+                    "raw": c.raw,
+                    "cents": c.cents,
+                    "kind": PriceKind(c.kind).name.lower(),
+                    "reason": c.reason,
+                    "start": c.start,
+                    "end": c.end,
+                    "used": i == ev.price_index,
+                }
+                for i, c in enumerate(ev.price_candidates)
             ],
             "results": [
                 {
@@ -165,6 +177,13 @@ def create_app(deps: AppDeps) -> FastAPI:
                     "excluded_by": r.excluded_by,
                     "price_over_limit": r.price_over_limit,
                     "reason": r.reason,
+                    "max_price_cents": max_prices.get(r.rule_id),
+                    "include_spans": [
+                        {"start": s, "end": e, "term": t} for s, e, t in r.include_spans
+                    ],
+                    "exclude_spans": [
+                        {"start": s, "end": e, "term": t} for s, e, t in r.exclude_spans
+                    ],
                 }
                 for r in ev.results
             ],

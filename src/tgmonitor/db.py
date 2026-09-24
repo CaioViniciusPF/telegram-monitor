@@ -62,6 +62,10 @@ _MIGRATIONS: list[str] = [
         value  TEXT NOT NULL
     );
     """,
+    # v2: queda de preço em post editado (preço do alerta anterior do mesmo post)
+    """
+    ALTER TABLE alerts ADD COLUMN previous_price_cents INTEGER;
+    """,
 ]
 
 

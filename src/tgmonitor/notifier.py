@@ -35,13 +35,17 @@ class AlertMessage:
     price_cents: int | None
     price_filter_active: bool  # alguma regra casada tem preço máximo
     is_edit: bool
+    previous_price_cents: int | None = None  # post editado cujo preço baixou
 
 
 def format_alert(a: AlertMessage) -> str:
     e = html.escape
     lines = [f"🔔 <b>{e(', '.join(a.rule_names))}</b>"]
     lines.append(f"👥 {e(a.chat_title)}")
-    if a.price_cents is not None:
+    if a.previous_price_cents is not None and a.price_cents is not None:
+        old, new = format_brl(a.previous_price_cents), format_brl(a.price_cents)
+        lines.append(f"📉 <b>Preço baixou:</b> de {old} para {new}")
+    elif a.price_cents is not None:
         lines.append(f"💰 {format_brl(a.price_cents)}")
     elif a.price_filter_active:
         lines.append("⚠️ <i>preço não identificado</i>")

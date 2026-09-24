@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,8 @@ name = "tgmonitor"
 version = "0.1.0"
 description = "Monitor pessoal de promoções em grupos/canais do Telegram, com alertas via bot."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "telethon>=1.36,<2",
@@ -25,6 +26,11 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.4",
     "mypy>=1.10",
+]
+# Só para regenerar as imagens do README (scripts/screenshots.py).
+screenshots = [
+    "playwright>=1.45",
+    "pillow>=10",
 ]
 
 [project.scripts]

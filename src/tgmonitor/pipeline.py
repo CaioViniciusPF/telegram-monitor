@@ -99,30 +99,61 @@ class Pipeline:
         fps = fingerprints(msg.text, rule_ids, ev.price_cents, msg.extra_urls)
         since = int(now - self.settings.dedup_window_hours * 3600)
 
+        refs = [MatchedRuleRef(id=r.rule_id, name=r.rule_name) for r in matched]
+        link = message_link(msg.chat_id, msg.message_id, chat.username)
+        previous_price: int | None = None
+
         async with self._lock:
-            if await self.repo.alert_exists(msg.chat_id, msg.message_id):
-                self.stats["dedup_same_post"] += 1
-                return "dup_same_post"
-            if await self.repo.any_fingerprint_since(fps, since):
-                self.stats["dedup"] += 1
-                log.info("dedup chat=%s msg=%s", msg.chat_id, msg.message_id)
-                return "dup_fingerprint"
-            link = message_link(msg.chat_id, msg.message_id, chat.username)
-            alert_id = await self.repo.insert_alert(
-                chat_id=msg.chat_id,
-                chat_title=chat.title,
-                message_id=msg.message_id,
-                link=link,
-                text=msg.text,
-                price_cents=ev.price_cents,
-                matched=[MatchedRuleRef(id=r.rule_id, name=r.rule_name) for r in matched],
-                is_edit=msg.is_edit,
-                fps=fps,
-                created_at=int(now),
-            )
-        if alert_id is None:
-            self.stats["dedup_same_post"] += 1
-            return "dup_same_post"
+            existing = await self.repo.alert_for_message(msg.chat_id, msg.message_id)
+            if existing is not None:
+                # Post já alertado: só alerta de novo se for uma edição que BAIXOU o preço.
+                alert_id, alerted_price = existing
+                dropped = (
+                    msg.is_edit
+                    and ev.price_cents is not None
+                    and alerted_price is not None
+                    and ev.price_cents < alerted_price
+                )
+                if not dropped:
+                    self.stats["dedup_same_post"] += 1
+                    return "dup_same_post"
+                # O novo preço pode já ter sido alertado em outro post (ignora o próprio).
+                if await self.repo.any_fingerprint_since(fps, since, exclude_alert_id=alert_id):
+                    self.stats["dedup"] += 1
+                    log.info("dedup (queda de preço) chat=%s msg=%s", msg.chat_id, msg.message_id)
+                    return "dup_fingerprint"
+                assert ev.price_cents is not None and alerted_price is not None
+                previous_price = alerted_price
+                await self.repo.record_price_drop(
+                    alert_id,
+                    text=msg.text,
+                    price_cents=ev.price_cents,
+                    previous_price_cents=alerted_price,
+                    matched=refs,
+                    fps=fps,
+                    created_at=int(now),
+                )
+            else:
+                if await self.repo.any_fingerprint_since(fps, since):
+                    self.stats["dedup"] += 1
+                    log.info("dedup chat=%s msg=%s", msg.chat_id, msg.message_id)
+                    return "dup_fingerprint"
+                new_id = await self.repo.insert_alert(
+                    chat_id=msg.chat_id,
+                    chat_title=chat.title,
+                    message_id=msg.message_id,
+                    link=link,
+                    text=msg.text,
+                    price_cents=ev.price_cents,
+                    matched=refs,
+                    is_edit=msg.is_edit,
+                    fps=fps,
+                    created_at=int(now),
+                )
+                if new_id is None:
+                    self.stats["dedup_same_post"] += 1
+                    return "dup_same_post"
+                alert_id = new_id
 
         price_filter = any(
             cr.spec.max_price_cents is not None for cr in self.rules if cr.spec.id in rule_ids
@@ -136,19 +167,23 @@ class Pipeline:
                 price_cents=ev.price_cents,
                 price_filter_active=price_filter,
                 is_edit=msg.is_edit,
+                previous_price_cents=previous_price,
             )
         )
         if ok:
             await self.repo.mark_delivered(alert_id)
-            self.stats["alerts"] += 1
+            self.stats["price_drops" if previous_price is not None else "alerts"] += 1
         else:
             self.stats["alert_send_failed"] += 1
         log.info(
-            "alerta id=%s chat=%s msg=%s regras=%s entregue=%s",
+            "alerta id=%s chat=%s msg=%s regras=%s entregue=%s queda=%s",
             alert_id,
             msg.chat_id,
             msg.message_id,
             rule_ids,
             ok,
+            previous_price is not None,
         )
+        if previous_price is not None:
+            return "price_drop" if ok else "alert_failed"
         return "alerted" if ok else "alert_failed"

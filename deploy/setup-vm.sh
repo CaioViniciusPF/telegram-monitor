@@ -3,7 +3,7 @@
 # Idempotente: pode rodar de novo para atualizar dependências/unit.
 #
 # Uso (como root, com o repositório já clonado em /opt/telegram-monitor):
-#   sudo git clone https://github.com/SEU_USUARIO/telegram-monitor.git /opt/telegram-monitor
+#   sudo git clone https://github.com/CaioViniciusPF/telegram-monitor.git /opt/telegram-monitor
 #   sudo bash /opt/telegram-monitor/deploy/setup-vm.sh
 set -euo pipefail
 

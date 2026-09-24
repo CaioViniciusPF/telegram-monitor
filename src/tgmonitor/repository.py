@@ -57,20 +57,6 @@ class Repository:
             for r in rows
         ]
 
-    async def get_chat(self, chat_id: int) -> Chat | None:
-        async with self.conn.execute("SELECT * FROM chats WHERE id = ?", (chat_id,)) as cur:
-            r = await cur.fetchone()
-        if r is None:
-            return None
-        return Chat(
-            id=r["id"],
-            title=r["title"],
-            username=r["username"],
-            kind=r["kind"],
-            monitored=bool(r["monitored"]),
-            updated_at=r["updated_at"],
-        )
-
     async def set_monitored(self, chat_id: int, monitored: bool) -> bool:
         cur = await self.conn.execute(
             "UPDATE chats SET monitored = ? WHERE id = ?", (int(monitored), chat_id)
@@ -155,22 +141,63 @@ class Repository:
 
     # --------------------------------------------------------------- alerts
 
-    async def alert_exists(self, chat_id: int, message_id: int) -> bool:
+    async def alert_for_message(
+        self, chat_id: int, message_id: int
+    ) -> tuple[int, int | None] | None:
+        """(id, preço alertado) do alerta deste post, ou None se o post nunca gerou alerta."""
         async with self.conn.execute(
-            "SELECT 1 FROM alerts WHERE chat_id = ? AND message_id = ?", (chat_id, message_id)
+            "SELECT id, price_cents FROM alerts WHERE chat_id = ? AND message_id = ?",
+            (chat_id, message_id),
         ) as cur:
-            return await cur.fetchone() is not None
+            r = await cur.fetchone()
+        return (int(r["id"]), r["price_cents"]) if r else None
 
-    async def any_fingerprint_since(self, fps: Sequence[Fingerprint], since: int) -> bool:
+    async def any_fingerprint_since(
+        self, fps: Sequence[Fingerprint], since: int, exclude_alert_id: int | None = None
+    ) -> bool:
+        """Algum fingerprint já visto na janela? exclude_alert_id ignora os do próprio post."""
         for fp in fps:
             async with self.conn.execute(
                 "SELECT 1 FROM fingerprints"
-                " WHERE kind = ? AND hash = ? AND created_at >= ? LIMIT 1",
-                (fp.kind, fp.hash, since),
+                " WHERE kind = ? AND hash = ? AND created_at >= ? AND alert_id IS NOT ? LIMIT 1",
+                (fp.kind, fp.hash, since, exclude_alert_id),
             ) as cur:
                 if await cur.fetchone() is not None:
                     return True
         return False
+
+    async def record_price_drop(
+        self,
+        alert_id: int,
+        *,
+        text: str,
+        price_cents: int,
+        previous_price_cents: int,
+        matched: Sequence[MatchedRuleRef],
+        fps: Sequence[Fingerprint],
+        created_at: int,
+    ) -> None:
+        """Atualiza o alerta de um post editado cujo preço baixou (uma linha por post)."""
+        await self.conn.execute(
+            """
+            UPDATE alerts SET text = ?, price_cents = ?, previous_price_cents = ?,
+                              matched_rules = ?, is_edit = 1, delivered = 0, created_at = ?
+            WHERE id = ?
+            """,
+            (
+                text,
+                price_cents,
+                previous_price_cents,
+                json.dumps([m.model_dump() for m in matched], ensure_ascii=False),
+                created_at,
+                alert_id,
+            ),
+        )
+        await self.conn.executemany(
+            "INSERT INTO fingerprints (kind, hash, alert_id, created_at) VALUES (?, ?, ?, ?)",
+            [(fp.kind, fp.hash, alert_id, created_at) for fp in fps],
+        )
+        await self.conn.commit()
 
     async def insert_alert(
         self,
@@ -240,6 +267,7 @@ class Repository:
                 is_edit=bool(r["is_edit"]),
                 delivered=bool(r["delivered"]),
                 created_at=r["created_at"],
+                previous_price_cents=r["previous_price_cents"],
             )
             for r in rows
         ]

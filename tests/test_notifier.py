@@ -105,3 +105,19 @@ def test_format_alert_escapes_html_and_truncates() -> None:
     assert "editada" in out
     assert "…" in out
     assert 'href="https://t.me/c/1/2"' in out
+
+
+def test_format_price_drop() -> None:
+    a = AlertMessage(
+        chat_title="Grupo",
+        rule_names=["S25"],
+        text="S25 Ultra por R$ 4.999",
+        link=None,
+        price_cents=499900,
+        price_filter_active=False,
+        is_edit=True,
+        previous_price_cents=549900,
+    )
+    out = format_alert(a)
+    assert "Preço baixou:</b> de R$ 5.499,00 para R$ 4.999,00" in out
+    assert "💰" not in out

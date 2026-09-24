@@ -61,10 +61,6 @@ class Settings(BaseSettings):
         return self.data_dir / "monitor.db"
 
 
-def load_settings() -> Settings:
-    return Settings()  # type: ignore[call-arg]  # campos vêm do ambiente/.env
-
-
 def ensure_data_dir(path: Path) -> None:
     """Cria o diretório de dados com permissão 700."""
     path.mkdir(parents=True, exist_ok=True)

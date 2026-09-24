@@ -1,6 +1,6 @@
 [Unit]
 Description=tgmonitor - monitor de promoções do Telegram
-Documentation=https://github.com/SEU_USUARIO/telegram-monitor
+Documentation=https://github.com/CaioViniciusPF/telegram-monitor
 After=network-online.target
 Wants=network-online.target
 # Nunca desistir de reiniciar por excesso de falhas (o supervisor interno já faz backoff).

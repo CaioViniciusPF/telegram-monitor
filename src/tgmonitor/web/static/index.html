@@ -4,124 +4,200 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="light dark">
   <title>tgmonitor</title>
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/app.js" defer></script>
 </head>
 <body>
   <!-- Token: pedido uma vez e mantido só em memória (some ao recarregar a página). -->
-  <dialog id="token-dialog">
+  <dialog id="token-dialog" aria-labelledby="token-title">
     <form id="token-form" method="dialog">
-      <h2>tgmonitor</h2>
-      <p class="muted">Informe o <code>API_TOKEN</code> do seu <code>.env</code>.</p>
-      <input id="token-input" type="password" autocomplete="off" required minlength="32" placeholder="API_TOKEN">
-      <p id="token-error" class="error" hidden></p>
-      <button type="submit" class="primary">Entrar</button>
+      <h1 id="token-title">Entrar no tgmonitor</h1>
+      <p class="meta">Cole o <code>API_TOKEN</code> do arquivo de configuração. Na VM, veja com
+        <code>sudo grep API_TOKEN /etc/tgmonitor/tgmonitor.env</code>.</p>
+      <label class="field">
+        <span>Token</span>
+        <input id="token-input" type="password" autocomplete="off" required minlength="32">
+      </label>
+      <p id="token-error" class="error" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary">Entrar</button>
     </form>
   </dialog>
 
-  <header>
-    <h1>tgmonitor</h1>
-    <span id="status-pill" class="pill">…</span>
-    <nav id="tabs">
-      <button data-tab="chats" class="active">Grupos</button>
-      <button data-tab="rules">Regras</button>
-      <button data-tab="test">Testar</button>
-      <button data-tab="alerts">Histórico</button>
-      <button data-tab="settings">Ajustes</button>
-    </nav>
+  <div id="version-banner" class="version-banner" role="alert" hidden>
+    A interface foi atualizada, mas o serviço em execução é de uma versão anterior.
+    Reinicie o <code>tgmonitor run</code> (na VM: <code>sudo systemctl restart telegram-monitor</code>)
+    e recarregue a página com Ctrl+F5.
+  </div>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-name">tgmonitor</span>
+        <span id="status" class="status">Carregando</span>
+      </div>
+      <nav class="tabs" id="tabs" aria-label="Seções">
+        <button type="button" data-tab="chats" aria-current="page">Grupos</button>
+        <button type="button" data-tab="rules">Regras</button>
+        <button type="button" data-tab="test">Testar</button>
+        <button type="button" data-tab="alerts">Histórico</button>
+        <button type="button" data-tab="settings">Ajustes</button>
+      </nav>
+    </div>
   </header>
 
   <main>
-    <!-- ---------------------------------------------------------- Grupos -->
-    <section id="tab-chats" class="tab">
-      <div class="toolbar">
-        <input id="chat-search" type="search" placeholder="Buscar grupo/canal…">
-        <label class="check"><input id="chat-only-monitored" type="checkbox"> só monitorados</label>
-        <button id="chat-refresh">Atualizar lista</button>
+    <!-- ------------------------------------------------------------ Grupos -->
+    <section id="tab-chats" class="tab" aria-labelledby="h-chats">
+      <div class="page-head">
+        <h1 id="h-chats">Grupos</h1>
+        <button type="button" id="chat-refresh" class="btn">Atualizar grupos</button>
       </div>
-      <p class="muted" id="chat-summary"></p>
-      <ul id="chat-list" class="list"></ul>
+      <p id="chat-summary" class="meta"></p>
+      <div class="filters">
+        <label>
+          <span class="sr-only">Buscar grupo ou canal</span>
+          <input id="chat-search" type="search" placeholder="Buscar grupo ou canal">
+        </label>
+        <label class="check"><input id="chat-only-monitored" type="checkbox"> Só monitorados</label>
+      </div>
+      <ul id="chat-list" class="rows"></ul>
     </section>
 
-    <!-- ---------------------------------------------------------- Regras -->
-    <section id="tab-rules" class="tab" hidden>
-      <div class="toolbar">
-        <button id="rule-new" class="primary">Nova regra</button>
+    <!-- ------------------------------------------------------------ Regras -->
+    <section id="tab-rules" class="tab" aria-labelledby="h-rules" hidden>
+      <div class="page-head">
+        <h1 id="h-rules">Regras</h1>
+        <button type="button" id="rule-new" class="btn btn-primary">Nova regra</button>
       </div>
-      <table class="rules">
-        <thead><tr><th>Ativa</th><th>Nome</th><th>Inclusão</th><th>Exclusão</th><th>Preço máx.</th><th></th></tr></thead>
-        <tbody id="rule-rows"></tbody>
-      </table>
+      <p class="meta">Uma mensagem gera alerta quando casa com algum termo de inclusão e com nenhum de exclusão.</p>
 
-      <form id="rule-form" class="card" hidden>
-        <h3 id="rule-form-title">Nova regra</h3>
-        <label>Nome <input name="name" required maxlength="100"></label>
-        <div class="grid2">
-          <label>Termos de inclusão <span class="muted">(um por linha; basta um casar)</span>
-            <textarea name="include" rows="6" required placeholder="s25 ultra&#10;/s2[56]\s*(\+|plus|ultra)/"></textarea>
+      <form id="rule-form" class="panel" hidden novalidate>
+        <h2 id="rule-form-title">Nova regra</h2>
+        <label class="field">
+          <span>Nome</span>
+          <input name="name" required maxlength="100" autocomplete="off">
+        </label>
+        <div class="grid-2">
+          <label class="field">
+            <span>Termos de inclusão <span class="meta">um por linha, basta um casar</span></span>
+            <textarea name="include" class="mono" rows="5" spellcheck="false"
+              placeholder="s25 ultra&#10;/s2[56]\s*(\+|plus|ultra)/"></textarea>
           </label>
-          <label>Termos de exclusão <span class="muted">(opcional; um por linha)</span>
-            <textarea name="exclude" rows="6" placeholder="capa&#10;película&#10;fe"></textarea>
+          <label class="field">
+            <span>Termos de exclusão <span class="meta">opcional, um por linha</span></span>
+            <textarea name="exclude" class="mono" rows="5" spellcheck="false"
+              placeholder="capa&#10;película&#10;fe"></textarea>
           </label>
         </div>
-        <p class="hint">Termos simples casam por palavra inteira, sem acento e sem diferenciar maiúsculas
-          (<code>fe</code> não casa com “feito”). Regex entre barras: <code>/s2[56]\s*ultra/</code>.</p>
-        <div class="row">
-          <label>Preço máximo (R$, opcional) <input name="max_price" inputmode="decimal" placeholder="5.500,00"></label>
-          <label class="check"><input name="enabled" type="checkbox" checked> ativa</label>
+        <p class="hint">Termos simples casam por palavra inteira, sem acento e sem diferenciar maiúsculas:
+          <code>fe</code> não casa com “feito”. Para regex, use barras: <code>/s2[56]\s*ultra/</code>.</p>
+        <div class="grid-2">
+          <label class="field">
+            <span>Preço máximo <span class="meta">opcional, em reais</span></span>
+            <input name="max_price" inputmode="decimal" placeholder="5.500,00" autocomplete="off">
+          </label>
+          <div class="field">
+            <span class="label">Situação</span>
+            <label class="check"><input name="enabled" type="checkbox" checked> Regra ativa</label>
+          </div>
         </div>
-        <details>
+
+        <details id="draft-details" class="field">
           <summary>Testar este rascunho</summary>
-          <textarea id="draft-text" rows="5" placeholder="Cole aqui o texto de uma promoção…"></textarea>
-          <button type="button" id="draft-test">Testar</button>
-          <div id="draft-result"></div>
+          <label class="field">
+            <span class="sr-only">Texto para testar o rascunho</span>
+            <textarea id="draft-text" class="mono" rows="5" spellcheck="false"
+              placeholder="Cole aqui o texto de uma promoção"></textarea>
+          </label>
+          <button type="button" id="draft-test" class="btn">Testar rascunho</button>
+          <div id="draft-result" aria-live="polite"></div>
         </details>
-        <p id="rule-error" class="error" hidden></p>
-        <div class="row">
-          <button type="submit" class="primary">Salvar</button>
-          <button type="button" id="rule-cancel">Cancelar</button>
+
+        <p id="rule-error" class="error" role="alert" hidden></p>
+        <div class="actions">
+          <button type="submit" class="btn btn-primary" id="rule-save">Salvar regra</button>
+          <button type="button" class="btn-quiet" id="rule-cancel">Cancelar</button>
         </div>
       </form>
+
+      <ul id="rule-list" class="rows"></ul>
     </section>
 
-    <!-- ---------------------------------------------------------- Testar -->
-    <section id="tab-test" class="tab" hidden>
-      <div class="card">
-        <label>Regra
-          <select id="test-rule"></select>
-        </label>
-        <label>Texto da mensagem
-          <textarea id="test-text" rows="10" placeholder="Cole aqui o texto de uma promoção…"></textarea>
-        </label>
-        <button id="test-run" class="primary">Testar</button>
+    <!-- ------------------------------------------------------------ Testar -->
+    <section id="tab-test" class="tab" aria-labelledby="h-test" hidden>
+      <div class="page-head">
+        <h1 id="h-test">Testar</h1>
       </div>
-      <div id="test-result"></div>
+      <p class="meta">Cole o texto de uma promoção para ver se ele geraria alerta e por quê. Nada é salvo nem enviado.</p>
+      <label class="field select-field">
+        <span>Regra</span>
+        <select id="test-rule"></select>
+      </label>
+      <label class="field">
+        <span>Texto da mensagem</span>
+        <textarea id="test-text" class="mono" rows="8" spellcheck="false"
+          placeholder="Cole aqui o texto de uma promoção"></textarea>
+      </label>
+      <div class="actions">
+        <button type="button" id="test-run" class="btn btn-primary">Testar texto</button>
+      </div>
+      <div id="test-result" aria-live="polite"></div>
     </section>
 
-    <!-- -------------------------------------------------------- Histórico -->
-    <section id="tab-alerts" class="tab" hidden>
-      <div class="toolbar"><button id="alerts-reload">Recarregar</button></div>
-      <ul id="alert-list" class="alerts"></ul>
+    <!-- --------------------------------------------------------- Histórico -->
+    <section id="tab-alerts" class="tab" aria-labelledby="h-alerts" hidden>
+      <div class="page-head">
+        <h1 id="h-alerts">Histórico</h1>
+        <button type="button" id="alerts-reload" class="btn">Recarregar histórico</button>
+      </div>
+      <p class="meta">Últimos 100 alertas, do mais recente para o mais antigo.</p>
+      <ul id="alert-list" class="rows"></ul>
     </section>
 
-    <!-- ---------------------------------------------------------- Ajustes -->
-    <section id="tab-settings" class="tab" hidden>
-      <form id="settings-form" class="card">
-        <label class="check"><input name="paused" type="checkbox"> Pausar alertas</label>
-        <label>Janela de deduplicação (horas) <input name="dedup_window_hours" type="number" min="0.1" step="0.1" required></label>
-        <label>Ignorar mensagens novas com mais de (horas) <input name="max_new_message_age_hours" type="number" min="0.1" step="0.1" required></label>
-        <label>Ignorar edições de mensagens com mais de (horas) <input name="max_edit_age_hours" type="number" min="0.1" step="0.1" required></label>
-        <label>Manter histórico por (dias) <input name="alert_retention_days" type="number" min="1" step="1" required></label>
-        <p id="settings-msg" class="muted"></p>
-        <button type="submit" class="primary">Salvar ajustes</button>
+    <!-- ----------------------------------------------------------- Ajustes -->
+    <section id="tab-settings" class="tab" aria-labelledby="h-settings" hidden>
+      <div class="page-head">
+        <h1 id="h-settings">Ajustes</h1>
+      </div>
+      <p class="meta">Valem imediatamente, sem reiniciar o serviço.</p>
+      <form id="settings-form" novalidate>
+        <div class="setting">
+          <label for="set-paused">Pausar alertas <span class="meta">o monitor continua conectado</span></label>
+          <input id="set-paused" name="paused" type="checkbox" class="switch" role="switch">
+        </div>
+        <div class="setting">
+          <label for="set-window">Janela de deduplicação</label>
+          <span class="num-input"><input id="set-window" name="dedup_window_hours" type="number" min="0.1" step="0.1" required> horas</span>
+        </div>
+        <div class="setting">
+          <label for="set-new">Ignorar mensagens novas com mais de</label>
+          <span class="num-input"><input id="set-new" name="max_new_message_age_hours" type="number" min="0.1" step="0.1" required> horas</span>
+        </div>
+        <div class="setting">
+          <label for="set-edit">Ignorar edições de mensagens com mais de</label>
+          <span class="num-input"><input id="set-edit" name="max_edit_age_hours" type="number" min="0.1" step="0.1" required> horas</span>
+        </div>
+        <div class="setting">
+          <label for="set-retention">Manter histórico por</label>
+          <span class="num-input"><input id="set-retention" name="alert_retention_days" type="number" min="1" step="1" required> dias</span>
+        </div>
+        <p id="settings-error" class="error" role="alert" hidden></p>
+        <div class="settings-actions">
+          <button type="submit" class="btn btn-primary">Salvar ajustes</button>
+        </div>
       </form>
-      <div class="card">
-        <h3>Saúde</h3>
+
+      <h2>Saúde do serviço</h2>
+      <p id="health-summary"></p>
+      <details>
+        <summary>Detalhes técnicos</summary>
         <pre id="health"></pre>
-      </div>
+      </details>
     </section>
   </main>
-  <div id="toast" hidden></div>
+
+  <div id="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>

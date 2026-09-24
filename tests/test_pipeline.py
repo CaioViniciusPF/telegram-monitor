@@ -150,13 +150,103 @@ async def test_dedup_window_expires(setup: tuple[Pipeline, FakeSender, Repositor
     assert await p._handle(later) == "alerted"
 
 
-async def test_edit_never_realerts_same_post(
+# ------------------------------------------------ edições de post já alertado
+# PROMO sai por R$ 5.499. Só uma edição que BAIXA o preço gera alerta de novo.
+
+
+def edit(text: str, mid: int = 10) -> IncomingMessage:
+    return msg(text, mid=mid, is_edit=True, age_h=0.5)
+
+
+async def test_edit_price_drop_realerts(setup: tuple[Pipeline, FakeSender, Repository]) -> None:
+    p, sender, repo = setup
+    assert await p._handle(msg(PROMO, mid=10)) == "alerted"
+    dropped = "Galaxy S25 Ultra BAIXOU: de R$ 7.999 por R$ 4.999 https://amzn.to/aaa"
+    assert await p._handle(edit(dropped)) == "price_drop"
+
+    assert len(sender.sent) == 2
+    drop = sender.sent[1]
+    assert (drop.previous_price_cents, drop.price_cents, drop.is_edit) == (549900, 499900, True)
+    assert "Preço baixou" in format_alert(drop)
+
+    (row,) = await repo.list_alerts()  # continua uma linha por post
+    assert (row.price_cents, row.previous_price_cents, row.delivered) == (499900, 549900, True)
+    assert row.text == dropped
+
+
+async def test_edit_price_increase_ignored(setup: tuple[Pipeline, FakeSender, Repository]) -> None:
+    p, sender, _ = setup
+    assert await p._handle(msg(PROMO, mid=10)) == "alerted"
+    assert await p._handle(edit("Galaxy S25 Ultra por R$ 5.899")) == "dup_same_post"
+    assert len(sender.sent) == 1
+
+
+async def test_edit_same_price_ignored(setup: tuple[Pipeline, FakeSender, Repository]) -> None:
+    p, sender, _ = setup
+    assert await p._handle(msg(PROMO, mid=10)) == "alerted"
+    assert (
+        await p._handle(edit("Galaxy S25 Ultra, ÚLTIMAS UNIDADES por R$ 5.499")) == "dup_same_post"
+    )
+    assert len(sender.sent) == 1
+
+
+async def test_edit_price_not_identified_ignored(
     setup: tuple[Pipeline, FakeSender, Repository],
 ) -> None:
     p, sender, _ = setup
     assert await p._handle(msg(PROMO, mid=10)) == "alerted"
-    edited = "Galaxy S25 Ultra AGORA R$ 4.999 https://amzn.to/zzz"  # texto e preço diferentes
-    assert await p._handle(msg(edited, mid=10, is_edit=True, age_h=0.5)) == "dup_same_post"
+    assert await p._handle(edit("Galaxy S25 Ultra ESGOTOU")) == "dup_same_post"
+    assert len(sender.sent) == 1
+
+
+async def test_edit_when_first_alert_had_no_price_ignored(
+    setup: tuple[Pipeline, FakeSender, Repository],
+) -> None:
+    """Sem preço anterior não há como falar em queda: a edição é ignorada."""
+    p, sender, _ = setup
+    assert await p._handle(msg("Galaxy S25 Ultra preço só no app", mid=10)) == "alerted"
+    assert await p._handle(edit("Galaxy S25 Ultra por R$ 4.999")) == "dup_same_post"
+    assert len(sender.sent) == 1
+
+
+async def test_price_drop_only_once_per_price(
+    setup: tuple[Pipeline, FakeSender, Repository],
+) -> None:
+    p, sender, _ = setup
+    assert await p._handle(msg(PROMO, mid=10)) == "alerted"
+    assert await p._handle(edit("S25 Ultra por R$ 4.999")) == "price_drop"
+    assert await p._handle(edit("S25 Ultra por R$ 4.999 (corrigido)")) == "dup_same_post"
+    assert await p._handle(edit("S25 Ultra por R$ 4.799")) == "price_drop"
+    assert [a.price_cents for a in sender.sent] == [549900, 499900, 479900]
+
+
+async def test_price_drop_deduped_against_other_posts(
+    setup: tuple[Pipeline, FakeSender, Repository],
+) -> None:
+    """Se o preço novo já foi alertado em outro grupo, a queda não gera alerta repetido."""
+    p, sender, _ = setup
+    assert await p._handle(msg("S25 Ultra por R$ 4.999", chat=CHAT_B, mid=1)) == "alerted"
+    assert await p._handle(msg(PROMO, mid=10)) == "alerted"
+    assert await p._handle(edit("Galaxy S25 Ultra agora por R$ 4.999")) == "dup_fingerprint"
+    assert len(sender.sent) == 2
+
+
+async def test_price_drop_still_needs_rule_match(
+    setup: tuple[Pipeline, FakeSender, Repository],
+) -> None:
+    p, sender, _ = setup
+    assert await p._handle(msg(PROMO, mid=10)) == "alerted"
+    assert await p._handle(edit("Capa para S25 Ultra por R$ 49")) == "no_match"
+    assert len(sender.sent) == 1
+
+
+async def test_new_message_with_same_id_never_realerts(
+    setup: tuple[Pipeline, FakeSender, Repository],
+) -> None:
+    """Mensagem nova (não edição) repetida pelo catch_up: nunca realerta, mesmo mais barata."""
+    p, sender, _ = setup
+    assert await p._handle(msg(PROMO, mid=10)) == "alerted"
+    assert await p._handle(msg("S25 Ultra por R$ 4.999", mid=10)) == "dup_same_post"
     assert len(sender.sent) == 1
 
 

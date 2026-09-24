@@ -17,8 +17,13 @@ import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
-from tgmonitor.matching.normalize import normalize, strip_accents
-from tgmonitor.matching.price import PriceCandidate, analyze_prices, pick_price
+from tgmonitor.matching.normalize import (
+    normalize,
+    normalize_with_map,
+    original_span,
+    strip_accents,
+)
+from tgmonitor.matching.price import PriceCandidate, analyze_prices, pick_index
 
 _MAX_TERM_LEN = 500
 
@@ -107,6 +112,9 @@ class RuleResult:
     excluded_by: list[str] = field(default_factory=list)
     price_over_limit: bool = False
     reason: str = ""
+    # Só no modo explain: trechos [início, fim, termo] no texto ORIGINAL.
+    include_spans: list[tuple[int, int, str]] = field(default_factory=list)
+    exclude_spans: list[tuple[int, int, str]] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -114,14 +122,11 @@ class Evaluation:
     price_cents: int | None
     price_candidates: list[PriceCandidate]
     results: list[RuleResult]
+    price_index: int | None = None  # qual candidato virou o preço
 
     @property
     def matched(self) -> list[RuleResult]:
         return [r for r in self.results if r.matched]
-
-    @property
-    def price_found(self) -> bool:
-        return self.price_cents is not None
 
 
 def _evaluate_rule(
@@ -171,12 +176,36 @@ def evaluate(text: str, rules: Iterable[CompiledRule], *, explain: bool = False)
     Com explain=True, lista todos os termos que casaram (tela de teste);
     sem ele, para no primeiro termo (caminho quente do listener).
     """
-    norm = normalize(text)
     candidates = analyze_prices(text)
-    price = pick_price(candidates)
-    results = [
-        _evaluate_rule(r, norm, price, stop_early=not explain)
-        for r in rules
-        if r.spec.enabled or explain
-    ]
-    return Evaluation(price_cents=price, price_candidates=candidates, results=results)
+    price_index = pick_index(candidates)
+    price = None if price_index is None else candidates[price_index].cents
+    if not explain:
+        norm = normalize(text)
+        results = [_evaluate_rule(r, norm, price, stop_early=True) for r in rules if r.spec.enabled]
+        return Evaluation(price_cents=price, price_candidates=candidates, results=results)
+
+    norm, index = normalize_with_map(text)
+    results = []
+    for r in rules:
+        res = _evaluate_rule(r, norm, price, stop_early=False)
+        res.include_spans = _spans(r.include, res.included_by, norm, index)
+        res.exclude_spans = _spans(r.exclude, res.excluded_by, norm, index)
+        results.append(res)
+    return Evaluation(
+        price_cents=price, price_candidates=candidates, results=results, price_index=price_index
+    )
+
+
+def _spans(
+    patterns: list[tuple[str, re.Pattern[str]]], terms: list[str], norm: str, index: list[int]
+) -> list[tuple[int, int, str]]:
+    wanted = set(terms)
+    out: list[tuple[int, int, str]] = []
+    for term, pat in patterns:
+        if term not in wanted:
+            continue
+        for m in pat.finditer(norm):
+            if m.end() > m.start():  # ignora casamentos vazios (ex: /a*/)
+                start, end = original_span(index, m.start(), m.end())
+                out.append((start, end, term))
+    return out
