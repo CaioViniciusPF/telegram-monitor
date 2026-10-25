@@ -156,8 +156,10 @@ Você vai juntar cinco valores para o arquivo `.env`: `TG_API_ID`, `TG_API_HASH`
 **Não mexa** nas seções de notificações push (**FCM**, **WNS**) nem na lista de
 servidores **MTProto** que aparecem na mesma página. Elas não são usadas por este projeto.
 
-> Se aparecer só "ERROR" ao criar, é uma limitação conhecida do site: tente de novo mais
-> tarde, em outro navegador, ou desative extensões de bloqueio.
+> Se aparecer só "ERROR" ao criar, a causa mais comum é o **Short name**: confira se tem
+> entre 5 e 32 caracteres, só letras minúsculas e números, sem espaço, hífen ou acento
+> (ex: troque por `tgmonitor2` ou `meutgmonitor`). Se persistir, tente outro navegador ou
+> desative extensões de bloqueio.
 
 ### 3.2 `BOT_TOKEN` (BotFather)
 
@@ -398,29 +400,89 @@ instalação (6.2)**: os passos são os mesmos.
 > Leia a [seção 7](#7-oracle-cloud-custos-e-cuidados) **antes** de criar a conta. Ela
 > explica o que é gratuito, quando o cartão pode ser cobrado e o que não tocar.
 
-1. Crie a conta em <https://www.oracle.com/cloud/free/>. **Escolha a região home com
-   cuidado** (ex: *Brazil East (Sao Paulo)*): as VMs gratuitas só podem ser criadas nela,
-   e ela não pode ser trocada depois.
-2. No console, abra o menu **☰ > Compute > Instances > Create instance**.
-3. **Image:** clique em *Change image* > **Canonical Ubuntu** > **24.04**. Confira o
-   rótulo **Always Free-eligible**.
-4. **Shape:** clique em *Change shape* > *Specialty and previous generation* >
+O console da Oracle muda de tempos em tempos, então esta seção diz **o que a VM precisa
+ter**, aponta o tutorial oficial e, por último, mostra como foi feito em setembro de 2026.
+Se a tela estiver diferente, siga a lista de requisitos.
+
+#### O que a VM precisa ter
+
+| Item | Valor |
+|---|---|
+| Região | A sua **região home** (ex: *Brazil East (Sao Paulo)*). VMs gratuitas só podem ser criadas nela, e ela não pode ser trocada depois. |
+| Imagem | **Canonical Ubuntu 24.04**, a versão padrão (não *Minimal* nem *aarch64*) |
+| Shape | **VM.Standard.E2.1.Micro** (AMD, 1 GB de RAM), com o rótulo **Always Free-eligible** |
+| Rede | Uma VCN com **sub-rede pública** e um **IPv4 público** atribuído à VM |
+| Acesso | Uma **chave SSH**. Só a porta 22 aberta, que já é o padrão |
+| Disco | O volume de boot padrão, sem volumes extras |
+
+#### Tutorial oficial
+
+A Oracle mantém o tutorial
+[Launching Your First Linux Instance](https://docs.oracle.com/en-us/iaas/Content/GSG/Reference/overviewworkflow.htm),
+que cria a rede e depois a VM, na mesma ordem usada aqui. **Não siga** duas partes dele:
+a de criar e anexar um *block volume* (não é necessário) e a de apagar os recursos no
+final (ela apagaria a sua VM).
+
+#### Pegadinhas conhecidas
+
+- **Login no console em três etapas:** primeiro o *Cloud Account Name* (o nome da sua
+  tenancy, não o e-mail), depois o *identity domain* **Default**, e só então e-mail e senha.
+- **Conta nova não tem rede.** Criar a rede pela tela da VM pode travar (o botão do IPv4
+  público não libera). Crie a rede antes, pelo assistente de VCN.
+- **A imagem padrão pode não ser a 24.04.** Confira antes de criar.
+- **"View estimated cost" mostra um valor**, como R$ 10/mês pelo volume de boot. Essa
+  estimativa usa o preço de tabela e ignora a cota gratuita. O volume padrão está dentro
+  dos 200 GB gratuitos.
+- **A chave SSH baixada pode ir para outra pasta.** Confira onde o navegador salvou
+  (`Ctrl+J`). No WSL, copie a chave para `~/.ssh` antes do `chmod 600`, que não funciona
+  em pastas do Windows (`/mnt/c`, `/mnt/d`). Nunca deixe a chave dentro da pasta do projeto.
+
+Se a tela estiver diferente do que está aqui, mandar prints para um assistente de IA
+ajuda bastante. **Nunca** envie a chave privada, senhas, o `.env` ou códigos de login.
+
+<details>
+<summary><strong>Como foi feito em setembro de 2026</strong> (a interface pode ter mudado)</summary>
+
+**1. Criar a rede**
+
+1. Menu **☰ > Networking > Virtual cloud networks > Start VCN Wizard** (ou, na página
+   inicial, *Set up a network with a wizard*).
+2. Escolha **Create VCN with Internet Connectivity**.
+3. Dê um nome (ex: `vcn-telegram-monitor`) e mantenha o resto no padrão: IPv6
+   desligado, sub-rede pública `10.0.0.0/24`, sub-rede privada `10.0.1.0/24`.
+4. **Next > Create**. A VCN, as sub-redes e os gateways não têm custo.
+
+**2. Criar a VM**
+
+1. Menu **☰ > Compute > Instances > Create instance**.
+2. **Image:** *Change image* > **Canonical Ubuntu** > **24.04**.
+3. **Shape:** *Change shape* > *Specialty and previous generation* >
    **VM.Standard.E2.1.Micro**. Confira o rótulo **Always Free-eligible**.
-5. **Networking:** mantenha a rede padrão, com **Assign a public IPv4 address** marcado.
-6. **SSH keys:** escolha *Generate a key pair for me* e clique em **Save private key**.
-   Guarde o arquivo baixado (ex: `ssh-key-2026-09-24.key`). Sem ele, não é possível
-   entrar na VM.
-7. **Boot volume:** não mude nada (o padrão é o gratuito).
-8. Clique em **Create**. Quando o estado ficar **Running**, copie o **Public IP address**.
-9. Conecte do seu computador (no WSL, copie antes a chave para `~/.ssh`):
+4. **Security:** mantenha o padrão (*Shielded instance*). Não ative a computação
+   confidencial.
+5. **Networking:** *Select existing virtual cloud network*, escolha a VCN criada e a
+   sub-rede **pública**. Ative **Automatically assign public IPv4 address**. Deixe o
+   IPv6 desligado.
+6. **SSH keys:** *Generate a key pair for me* > **Download private key**. Ela não é
+   mostrada de novo.
+7. **Boot volume:** não mude nada.
+8. **Create**. Quando o estado ficar **Running**, copie o **Public IP address**
+   (na página da instância, em *Instance access* ou *Primary VNIC*).
 
-   ```bash
-   chmod 600 ~/.ssh/ssh-key-2026-09-24.key
-   ssh -i ~/.ssh/ssh-key-2026-09-24.key ubuntu@IP_DA_VM
-   sudo apt update && sudo apt -y upgrade
-   ```
+**3. Conectar** (no WSL, troque o caminho pelo de onde a chave foi salva):
 
-Não abra portas no firewall da Oracle. Só a 22 (SSH), que já vem aberta, é necessária.
+```bash
+mkdir -p ~/.ssh
+cp /mnt/c/Users/SEU_USUARIO/Downloads/ssh-key-*.key ~/.ssh/oracle.key
+chmod 600 ~/.ssh/oracle.key
+ssh -i ~/.ssh/oracle.key ubuntu@IP_DA_VM
+sudo apt update && sudo apt -y upgrade
+```
+
+Na primeira conexão, responda `yes` à pergunta sobre a autenticidade do servidor. Se o
+`apt upgrade` pedir reinício, rode `sudo reboot` e conecte de novo depois de um minuto.
+
+</details>
 
 ### 6.2 Instalar o monitor (VM Oracle ou qualquer Ubuntu 24.04)
 
@@ -458,7 +520,7 @@ Na VM, a tela **não** fica exposta na internet. Você a acessa por um túnel SS
 partir do seu computador:
 
 ```bash
-ssh -i ~/.ssh/ssh-key-2026-09-24.key -N -L 8000:127.0.0.1:8000 ubuntu@IP_DA_VM
+ssh -i ~/.ssh/oracle.key -N -L 8000:127.0.0.1:8000 ubuntu@IP_DA_VM
 ```
 
 O comando fica "parado", sem mostrar nada: isso é normal. Deixe-o aberto e acesse
@@ -648,6 +710,8 @@ Depois, encerre a sessão em **Configurações > Dispositivos** no Telegram.
 | A tela não abre na VM | O túnel SSH (6.3) precisa estar aberto no seu computador enquanto você usa a tela. |
 | Grupo novo não aparece | Aba **Grupos** > **Atualizar grupos**. |
 | Link "Abrir no Telegram" ausente | Grupos antigos do tipo "grupo básico" não têm link por mensagem. |
+| Não consigo entrar no console da Oracle | O login tem três etapas: *Cloud Account Name* (nome da tenancy), *identity domain* **Default** e só então e-mail e senha. Para redefinir a senha, use *Forgot password?* na terceira etapa. Senhas usadas recentemente não são aceitas. |
+| `ssh` recusa a chave com *"UNPROTECTED PRIVATE KEY FILE"* | A chave está numa pasta do Windows ou sem permissão 600. Copie para `~/.ssh` e rode `chmod 600 ~/.ssh/oracle.key`. |
 | A VM da Oracle parou sozinha | Provavelmente foi considerada ociosa (seção 7). Ligue de novo em *Instances* > **Start**. |
 
 ---
