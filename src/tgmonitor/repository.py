@@ -280,6 +280,10 @@ class Repository:
         cur_al = await self.conn.execute(
             "DELETE FROM alerts WHERE created_at < ?", (ts - retention_days * 86400,)
         )
+        # Retenção fixa e curta: só serve para a janela de 24h de restart_events_since.
+        await self.conn.execute(
+            "DELETE FROM restart_events WHERE created_at < ?", (ts - 7 * 86400,)
+        )
         await self.conn.commit()
         return cur_al.rowcount, cur_fp.rowcount
 
@@ -299,3 +303,21 @@ class Repository:
             [(k, json.dumps(v)) for k, v in s.model_dump().items()],
         )
         await self.conn.commit()
+
+    # --------------------------------------------------------- restart events
+
+    async def record_restart_event(self, kind: str) -> None:
+        """Persiste um reinício do processo (sobrevive entre execuções, ao contrário dos
+        contadores em memória do Supervisor). Ver Supervisor.updates_watchdog."""
+        await self.conn.execute(
+            "INSERT INTO restart_events (kind, created_at) VALUES (?, ?)", (kind, now())
+        )
+        await self.conn.commit()
+
+    async def count_restart_events_since(self, kind: str, since: int) -> int:
+        async with self.conn.execute(
+            "SELECT COUNT(*) FROM restart_events WHERE kind = ? AND created_at >= ?",
+            (kind, since),
+        ) as cur:
+            row = await cur.fetchone()
+        return int(row[0]) if row else 0

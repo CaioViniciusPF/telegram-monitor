@@ -19,13 +19,23 @@ from tgmonitor.heartbeat import heartbeat_loop
 from tgmonitor.notifier import BotNotifier
 from tgmonitor.pipeline import Pipeline
 from tgmonitor.repository import Repository
-from tgmonitor.supervisor import FATAL_EXIT_CODE, FatalSessionError, Supervisor
-from tgmonitor.telegram.client import ReadOnlyTelegram
+from tgmonitor.supervisor import FATAL_EXIT_CODE, FatalSessionError, Supervisor, UpdatesStalledError
+from tgmonitor.telegram.client import IncomingMessage, ReadOnlyTelegram
 from tgmonitor.web.api import AppDeps, create_app
 
 log = logging.getLogger(__name__)
 
 JANITOR_INTERVAL_S = 3600
+
+# Mensagens monitoradas podem legitimamente ficar quietas por horas (depende dos grupos);
+# isso só avisa no /status, não aciona reconexão nem nada sozinho.
+MONITORED_SILENCE_WARNING_S = 6 * 3600
+
+# Reinício por falta de updates (ver Supervisor.updates_watchdog) só vira aviso no bot se
+# acontecer repetidamente — um único reinício isolado é o sistema se corrigindo sozinho.
+RESTART_NOTIFY_THRESHOLD = 3
+RESTART_NOTIFY_WINDOW_S = 24 * 3600
+_UPDATES_STALLED_KIND = "updates_stalled"
 
 
 class _Server(uvicorn.Server):
@@ -63,8 +73,16 @@ class Service:
             bot = BotNotifier(http, s.bot_token.get_secret_value(), s.owner_user_id)
             pipeline = Pipeline(repo, bot)
             await pipeline.reload()
-            tg.on_message(pipeline.handle)
             supervisor = Supervisor(tg, bot)
+
+            async def on_message(msg: IncomingMessage) -> None:
+                # Sinal de vida para o updates_watchdog: TODO chat conta, não só os
+                # monitorados (ver supervisor.py, docstring do módulo, e o diagnóstico do
+                # incidente de 16 dias sem updates).
+                supervisor.note_update()
+                await pipeline.handle(msg)
+
+            tg.on_message(on_message)
 
             async def refresh_chats() -> int:
                 if supervisor.state != "connected":
@@ -112,9 +130,14 @@ class Service:
                 )
             )
 
+            updates_watchdog_task = asyncio.create_task(
+                supervisor.updates_watchdog(), name="updates-watchdog"
+            )
             background = [
                 asyncio.create_task(supervisor.run(), name="supervisor"),
                 asyncio.create_task(supervisor.watchdog(), name="watchdog"),
+                updates_watchdog_task,
+                asyncio.create_task(supervisor.periodic_catch_up(), name="periodic-catch-up"),
                 asyncio.create_task(bot.poll_commands(), name="bot-commands"),
                 asyncio.create_task(self._janitor(repo, pipeline), name="janitor"),
                 asyncio.create_task(self._initial_chat_sync(repo, supervisor, refresh_chats)),
@@ -123,7 +146,13 @@ class Service:
                 background.append(
                     asyncio.create_task(
                         heartbeat_loop(
-                            http, s.healthcheck_url.get_secret_value(), supervisor.healthy
+                            http,
+                            s.healthcheck_url.get_secret_value(),
+                            # updates_flowing() já inclui healthy(): não só "conectado",
+                            # também exige um update recente de algum chat. É a mesma
+                            # falha que o updates_watchdog existe para detectar — se ela
+                            # também faz o heartbeat parar, o healthchecks.io avisa à parte.
+                            supervisor.updates_flowing,
                         ),
                         name="heartbeat",
                     )
@@ -139,10 +168,12 @@ class Service:
                 with contextlib.suppress(NotImplementedError):  # Windows
                     loop.add_signal_handler(sig, _stop)
 
-            # Encerra quando o web server para (sinal) ou o supervisor morre (erro fatal).
+            # Encerra quando o web server para (sinal), o supervisor morre (erro fatal) ou
+            # o updates_watchdog desiste (silêncio persistente mesmo após reconexão forçada).
             exit_code = 0
             sup_task = background[0]
-            done, _ = await asyncio.wait([web, sup_task], return_when=asyncio.FIRST_COMPLETED)
+            watch_set = [web, sup_task, updates_watchdog_task]
+            done, _ = await asyncio.wait(watch_set, return_when=asyncio.FIRST_COMPLETED)
             if sup_task in done:
                 exc = sup_task.exception()
                 if isinstance(exc, FatalSessionError):
@@ -150,6 +181,24 @@ class Service:
                 elif exc is not None:
                     log.error("supervisor terminou com erro: %s", type(exc).__name__)
                     exit_code = 1
+                server.should_exit = True
+            elif updates_watchdog_task in done:
+                exc = updates_watchdog_task.exception()
+                if isinstance(exc, UpdatesStalledError):
+                    log.error("sem updates de nenhum chat por tempo prolongado; reiniciando")
+                    await repo.record_restart_event(_UPDATES_STALLED_KIND)
+                    since = int(time.time()) - RESTART_NOTIFY_WINDOW_S
+                    count = await repo.count_restart_events_since(_UPDATES_STALLED_KIND, since)
+                    if count > RESTART_NOTIFY_THRESHOLD:
+                        await bot.send_notice(
+                            f"⚠️ tgmonitor: reiniciado {count} vezes nas últimas "
+                            f"{RESTART_NOTIFY_WINDOW_S // 3600}h por falta de updates de "
+                            "qualquer chat. Pode haver um problema persistente de rede ou "
+                            "com a sessão."
+                        )
+                elif exc is not None:
+                    log.error("updates_watchdog terminou com erro: %s", type(exc).__name__)
+                exit_code = 1
                 server.should_exit = True
             elif web.exception() is not None:
                 log.error("servidor web falhou: %s", type(web.exception()).__name__)
@@ -201,18 +250,34 @@ class Service:
             h = health()
             li = h["listener"]
             st = h["stats"]
+            now = time.time()
+
             last = h["last_message_at"]
-            ago = f"{int((time.time() - last) / 60)} min atrás" if last else "nenhuma ainda"
+            ago = f"{int((now - last) / 60)} min atrás" if last else "nenhuma ainda"
+            stale_warning = (
+                "\n⚠️ Nenhuma mensagem monitorada há mais de "
+                f"{MONITORED_SILENCE_WARNING_S // 3600}h."
+                if last and (now - last) > MONITORED_SILENCE_WARNING_S
+                else ""
+            )
+
+            last_update = li["last_update_at"]
+            update_ago = (
+                f"{int((now - last_update) / 60)} min atrás" if last_update else "nenhum ainda"
+            )
+
             return (
                 f"📊 tgmonitor\n"
                 f"Listener: {li['state']} ({'ok' if li['healthy'] else 'com problemas'})\n"
                 f"Pausado: {'sim' if h['paused'] else 'não'}\n"
                 f"Regras ativas: {h['active_rules']} | Chats: {h['monitored_chats']}\n"
-                f"Última mensagem monitorada: {ago}\n"
+                f"Última mensagem monitorada: {ago}{stale_warning}\n"
+                f"Último update (qualquer chat): {update_ago}\n"
                 f"Alertas: {st.get('alerts', 0)} | Quedas de preço: {st.get('price_drops', 0)} | "
                 f"Deduplicados: "
                 f"{st.get('dedup', 0) + st.get('dedup_same_post', 0)} | "
-                f"Falhas de conexão: {li['total_failures']}\n"
+                f"Falhas de reconexão: {li['total_failures']} | Quedas: {li['total_drops']}\n"
+                f'"Server closed" na última 1h: {li["connection_drops_1h"]}\n'
                 f"Uptime: {h['uptime_s'] // 3600}h{(h['uptime_s'] % 3600) // 60:02d}m"
             )
 

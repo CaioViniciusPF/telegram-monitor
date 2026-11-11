@@ -90,7 +90,15 @@ class ReadOnlyTelegram:
             device_model="tgmonitor",
             app_version="0.1",
             flood_sleep_threshold=120,
-            auto_reconnect=True,
+            # Desligado de propósito: a reconexão automática interna do Telethon tem uma
+            # condição de corrida conhecida e não resolvida (comentário "TODO it still gets
+            # stuck?" em MTProtoSender._start_reconnect) que pode deixar dois recv_loop
+            # concorrentes rodando — a conexão parece viva (get_me funciona) mas updates
+            # param de chegar, sem nenhuma exceção visível. Com isso desligado, toda queda
+            # sobe para o Supervisor, que reconecta de forma serializada (supervisor.py).
+            # Não afeta a conexão inicial nem as reconexões explícitas feitas por nós: elas
+            # continuam com as tentativas internas normais do Telethon (connection_retries).
+            auto_reconnect=False,
         )
 
     # --------------------------------------------------------- ciclo de vida

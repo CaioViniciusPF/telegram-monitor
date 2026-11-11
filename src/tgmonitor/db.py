@@ -66,6 +66,16 @@ _MIGRATIONS: list[str] = [
     """
     ALTER TABLE alerts ADD COLUMN previous_price_cents INTEGER;
     """,
+    # v3: histórico de reinícios do processo (persiste entre execuções, ao contrário dos
+    # contadores em memória do Supervisor) — usado para só avisar no bot se o processo
+    # reiniciar repetidamente por falta de updates (ver supervisor.py/service.py).
+    """
+    CREATE TABLE restart_events (
+        kind        TEXT NOT NULL,
+        created_at  INTEGER NOT NULL
+    );
+    CREATE INDEX idx_restart_events ON restart_events (kind, created_at);
+    """,
 ]
 
 
